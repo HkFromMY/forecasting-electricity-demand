@@ -5,3 +5,7 @@ model_tune/
 cnn_lstm_tune.zip
 model_tune_LSTM_with_setting_seed_and_test_data.zip
 model_tune_LSTM_without_setting_seed_and_withvalidation_split.zip
+quantile_gru_tuned/
+quantile_lstm_tuned/
+grid_result_prob.parquet
+grid_results_quantile_lightgbm.parquet
