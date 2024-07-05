@@ -9,3 +9,4 @@ quantile_gru_tuned/
 quantile_lstm_tuned/
 grid_result_prob.parquet
 grid_results_quantile_lightgbm.parquet
+streamlit_frontend/venv/
