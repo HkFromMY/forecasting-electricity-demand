@@ -39,17 +39,42 @@ def plot_forecast_by_household(households, household_id, y_pred, y_test, number_
         start_idx = 0 + (steps * i) + (skip)
         end_idx = steps * (1 + i) + (skip)
         sampled_test = filtered_df.iloc[start_idx:end_idx]['y_test']
-        sampled_pred = filtered_df.iloc[start_idx:end_idx][['pred_0.2', 'pred_0.5', 'pred_0.8']]
+        sampled_pred = filtered_df.iloc[start_idx:end_idx][['pred_0.1', 'pred_0.3', 'pred_0.5', 'pred_0.7', 'pred_0.9']]
         mape_score = mean_absolute_percentage_error(sampled_pred['pred_0.5'], sampled_test)
         
         sns.lineplot(x=timesteps, y=sampled_test, label="truth-value", marker='o', alpha=0.3, ax=axes[i])
         sns.lineplot(x=timesteps, y=sampled_pred['pred_0.5'], label="forecasted-median", marker='o', ax=axes[i])
-        axes[i].fill_between(x=timesteps, y1=sampled_pred['pred_0.2'], y2=sampled_pred['pred_0.8'], alpha=0.1, color='blue')
+        axes[i].fill_between(x=timesteps, y1=sampled_pred['pred_0.1'], y2=sampled_pred['pred_0.9'], alpha=0.1, color='blue', label="10th-90th")
+        axes[i].fill_between(x=timesteps, y1=sampled_pred['pred_0.3'], y2=sampled_pred['pred_0.7'], alpha=0.15, color='blue', label="30th-70th")
         axes[i].set_title(f'MAPE: {round(mape_score, 2)}')
         axes[i].set_ylabel('Energy (kWh/hh)')
 
     plt.tight_layout() 
 
+    return fig
+
+def plot_prob_forecast(
+    selected_household_id, 
+    train_timesteps,
+    test_timesteps,
+    filtered_train,
+    filtered_test,
+    forecast_step
+):
+    filtered_test = filtered_test[['y_test', 'y_pred_0.1', 'y_pred_0.3',
+       'y_pred_0.5', 'y_pred_0.7', 'y_pred_0.9']].astype('float32')
+
+    fig = plt.figure(figsize=(14, 8))
+    plt.title(f"Quantile-LSTM Forecasting {forecast_step}-steps ({forecast_step} hours) ahead for {selected_household_id}")
+    sns.lineplot(x=train_timesteps, y=filtered_train['y_train'], label='original-series', marker='o', color='steelblue')
+    sns.lineplot(x=test_timesteps, y=filtered_test['y_pred_0.5'], label='forecasted-series', marker='o', color='orange')
+    sns.lineplot(x=test_timesteps, y=filtered_test['y_test'], label='truth-series', marker='o', color='steelblue', alpha=0.3)
+    plt.fill_between(x=test_timesteps, y1=filtered_test['y_pred_0.1'], y2=filtered_test['y_pred_0.9'], alpha=0.1, color='blue', label="10th-90th")
+    plt.fill_between(x=test_timesteps, y1=filtered_test['y_pred_0.3'], y2=filtered_test['y_pred_0.7'], alpha=0.15, color='blue', label="30th-70th")
+    plt.ylabel("Energy (kWh)")
+    plt.xlabel("Timesteps (hour)")
+    plt.legend()
+    
     return fig
 
 @st.cache_data
@@ -59,9 +84,11 @@ def predict(X_test):
     y_pred = model.predict(X_test)
     y_pred = np.array(y_pred).squeeze() # compress to 2-Dimensional array
     y_pred = pd.DataFrame({
-        'pred_0.2': y_pred[0].ravel(),
-        'pred_0.5': y_pred[1].ravel(),
-        'pred_0.8': y_pred[2].ravel()
+        'pred_0.1': y_pred[0].ravel(),
+        'pred_0.3': y_pred[1].ravel(),
+        'pred_0.5': y_pred[2].ravel(),
+        'pred_0.7': y_pred[3].ravel(),
+        'pred_0.9': y_pred[4].ravel()
     })
 
     return y_pred
@@ -69,25 +96,30 @@ def predict(X_test):
 def probabilistic_page():
     df = load_data()
 
-    # Testing data
+    # whole data
+    X_train = df['X_train']
+    y_train = df['y_train']
     X_test = df['X_test']
     y_test = df['y_test']
 
     # Predictions
     y_pred = predict(X_test)
+    train_household_ids = df['train_household_ids']
     test_household_ids = df['test_household_ids']
 
     # calculate nad print the evaluation metrics
-    mse = mean_squared_error(y_pred['pred_0.5'], y_test)
-    rmse = mean_squared_error(y_pred['pred_0.5'], y_test, squared=False)
-    mae = mean_absolute_error(y_pred['pred_0.5'], y_test)
-    r2 = r2_score(y_pred['pred_0.5'], y_test)
-    mape = mean_absolute_percentage_error(y_pred['pred_0.5'], y_test)
+    mse = mean_squared_error(y_test, y_pred['pred_0.5'])
+    rmse = mean_squared_error(y_test, y_pred['pred_0.5'], squared=False)
+    mae = mean_absolute_error(y_test, y_pred['pred_0.5'])
+    r2 = r2_score(y_test, y_pred['pred_0.5'])
+    mape = mean_absolute_percentage_error(y_test, y_pred['pred_0.5'])
 
     # pinball losses
-    pinball_20 = mean_pinball_loss(y_pred['pred_0.2'], y_test, alpha=0.2)
-    pinball_50 = mean_pinball_loss(y_pred['pred_0.5'], y_test, alpha=0.5)
-    pinball_80 = mean_pinball_loss(y_pred['pred_0.8'], y_test, alpha=0.8)
+    pinball_10 = mean_pinball_loss(y_test, y_pred['pred_0.1'], alpha=0.1)
+    pinball_30 = mean_pinball_loss(y_test, y_pred['pred_0.3'], alpha=0.3)
+    pinball_50 = mean_pinball_loss(y_test, y_pred['pred_0.5'], alpha=0.5)
+    pinball_70 = mean_pinball_loss(y_test, y_pred['pred_0.7'], alpha=0.7)
+    pinball_90 = mean_pinball_loss(y_test, y_pred['pred_0.9'], alpha=0.9)
 
     st.header("Probabilistic Model (Quantile-LSTM)")
     col1, col2, col3, col4, col5 = st.columns(5)
@@ -101,20 +133,26 @@ def probabilistic_page():
         st.metric(label='MAE', value=round(mae, 4))
 
     with col4:
-        st.metric(label='R2', value=round(r2, 5))
+        st.metric(label='R2', value=round(r2, ))
     
     with col5:
         st.metric(label='MAPE', value=round(mape, 4))
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4, col5 = st.columns(5)
     with col1: 
-        st.metric(label='Pinball Loss (20)', value=round(pinball_20, 4))
+        st.metric(label='Pinball Loss (10)', value=round(pinball_10, 4))
 
     with col2:
-        st.metric(label='Pinball Loss (50)', value=round(pinball_50, 4))
+        st.metric(label='Pinball Loss (30)', value=round(pinball_30, 4))
 
     with col3:
-        st.metric(label='Pinball Loss (80)', value=round(pinball_80, 4))
+        st.metric(label='Pinball Loss (50)', value=round(pinball_50, 4))
+
+    with col4:
+        st.metric(label='Pinball Loss (70)', value=round(pinball_70, 4))
+
+    with col5:
+        st.metric(label='Pinball Loss (90)', value=round(pinball_90, 4))
 
     st.header("Visualize forecasting by household")
     col1, col2, col3 = st.columns(3)
@@ -133,5 +171,36 @@ def probabilistic_page():
 
     except ValueError:
         st.write("The skipped slices is more than the testing samples! Please adjust the skip slice value.")
+
+    # chart showing forecast from the starting point
+    st.header("Forecast with Quantile-LSTM")
+    col1, col2 = st.columns(2)
+    with col1:
+        households = np.unique(test_household_ids)
+        selected_household_for_forecast = st.selectbox("Select Household to Forecast", households)
+
+    with col2: 
+        forecast_step = st.slider("Forecast Step", min_value=72, max_value=672, value=72, step=1)
+
+    train_households = np.expand_dims(train_household_ids, axis=1)
+    test_households = np.expand_dims(test_household_ids, axis=1)
+    quantile_pred = y_pred.values # turn to 2-D numpy
+    test = np.expand_dims(y_test.to_numpy(), axis=1)
+    test_integrated = np.hstack((test_households, test, quantile_pred))
+    test_integrated = pd.DataFrame(test_integrated, columns=['household_ids', 'y_test', 'y_pred_0.1', 'y_pred_0.3', 'y_pred_0.5', 'y_pred_0.7', 'y_pred_0.9'])
+    train = np.expand_dims(y_train.to_numpy(), axis=1)
+    train_integrated = np.hstack((train_households, train))
+    train_integrated = pd.DataFrame(train_integrated, columns=['household_ids', 'y_train'])
+
+    filtered_train = train_integrated.loc[train_integrated['household_ids'] == selected_household_for_forecast]
+    filtered_train = filtered_train.iloc[-168:, :] # get the last week in the training set
+    filtered_test = test_integrated.loc[test_integrated['household_ids'] == selected_household_for_forecast]
+    filtered_test = filtered_test.iloc[:forecast_step, :] # get the forecast steps required in the testing set
+    train_timesteps = np.arange(len(filtered_train))
+    max_train_timesteps = np.max(train_timesteps)
+    test_timesteps = np.arange(max_train_timesteps + 1, max_train_timesteps + 1 + forecast_step)
+
+    st.pyplot(plot_prob_forecast(selected_household_for_forecast, train_timesteps, test_timesteps, filtered_train, filtered_test, forecast_step))
+
 
 probabilistic_page()

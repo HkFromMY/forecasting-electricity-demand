@@ -49,6 +49,25 @@ def plot_forecast_by_household(households, household_id, y_pred, y_test, number_
 
     return fig
 
+def plot_forecast(
+    selected_household_id,
+    train_timesteps,
+    test_timesteps,
+    filtered_train,
+    filtered_test,
+    forecast_step
+):
+    fig = plt.figure(figsize=(14, 8))
+    plt.title(f"CNN-LSTM Forecasting {forecast_step}-steps ({forecast_step} hours) ahead for {selected_household_id}")
+    sns.lineplot(x=train_timesteps, y=filtered_train['y_train'], label='original-series', marker='o', color='steelblue')
+    sns.lineplot(x=test_timesteps, y=filtered_test['y_pred'], label='forecasted-series', marker='o', color='orange')
+    sns.lineplot(x=test_timesteps, y=filtered_test['y_test'], label='truth-series', marker='o', color='steelblue', alpha=0.3)
+    plt.ylabel("Energy (kWh)")
+    plt.xlabel("Timesteps (hour)")
+
+    return fig
+    
+
 @st.cache_data
 def predict(X_test):
     model = load_deterministic_model()
@@ -60,22 +79,25 @@ def predict(X_test):
 def deterministic_model_page():
     df = load_data()
 
-    # Testing data
+    # whole data
+    X_train = df['X_train']
+    y_train = df['y_train']
     X_test = df['X_test']
     y_test = df['y_test']
 
     # Predictions
     y_pred, y_pred_flatten = predict(X_test)
+    train_household_ids = df['train_household_ids']
     test_household_ids = df['test_household_ids']
 
     # calculate nad print the evaluation metrics
-    mse = mean_squared_error(y_pred_flatten, y_test)
-    rmse = mean_squared_error(y_pred_flatten, y_test, squared=False)
-    mae = mean_absolute_error(y_pred_flatten, y_test)
-    r2 = r2_score(y_pred_flatten, y_test)
-    mape = mean_absolute_percentage_error(y_pred_flatten, y_test)
+    mse = mean_squared_error(y_test, y_pred_flatten)
+    rmse = mean_squared_error(y_test, y_pred_flatten, squared=False)
+    mae = mean_absolute_error(y_test, y_pred_flatten)
+    r2 = r2_score(y_test, y_pred_flatten)
+    mape = mean_absolute_percentage_error(y_test, y_pred_flatten)
 
-    st.header("Deterministic Model (LSTM)")
+    st.header("Deterministic Model (CNN-LSTM)")
     col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         st.metric(label='MSE', value=round(mse, 4))
@@ -92,6 +114,7 @@ def deterministic_model_page():
     with col5:
         st.metric(label='MAPE', value=round(mape, 4))
 
+    # chart showing the forecasting performance
     st.header("Visualize forecasting by household")
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -109,5 +132,36 @@ def deterministic_model_page():
 
     except ValueError:
         st.write("The skipped slices is more than the testing samples! Please adjust the skip slice value.")
+
+    # chart showing forecast from the starting point
+    st.header("Forecast with CNN-LSTM")
+    col1, col2 = st.columns(2)
+    with col1:
+        households = np.unique(test_household_ids)
+        selected_household_for_forecast = st.selectbox("Select Household to Forecast", households)
+
+    with col2: 
+        forecast_step = st.slider("Forecast Step", min_value=72, max_value=672, value=72, step=1)
+
+    train_households = np.expand_dims(train_household_ids, axis=1)
+    test_households = np.expand_dims(test_household_ids, axis=1)
+    pred = np.expand_dims(y_pred_flatten, axis=1)
+    test = np.expand_dims(y_test.to_numpy(), axis=1)
+    test_integrated = np.hstack((test_households, pred, test))
+    test_integrated = pd.DataFrame(test_integrated, columns=['household_ids', 'y_pred', 'y_test'])
+    train = np.expand_dims(y_train.to_numpy(), axis=1)
+    train_integrated = np.hstack((train_households, train))
+    train_integrated = pd.DataFrame(train_integrated, columns=['household_ids', 'y_train'])
+
+    filtered_train = train_integrated.loc[train_integrated['household_ids'] == selected_household_for_forecast]
+    filtered_train = filtered_train.iloc[-168:, :] # get the last week in the training set
+    filtered_test = test_integrated.loc[test_integrated['household_ids'] == selected_household_for_forecast]
+    filtered_test = filtered_test.iloc[:forecast_step, :] # get the forecast steps required in the testing set
+    train_timesteps = np.arange(len(filtered_train))
+    max_train_timesteps = np.max(train_timesteps)
+    test_timesteps = np.arange(max_train_timesteps + 1, max_train_timesteps + 1 + forecast_step)
+
+    st.pyplot(plot_forecast(selected_household_for_forecast, train_timesteps, test_timesteps, filtered_train, filtered_test, forecast_step))
+
 
 deterministic_model_page()

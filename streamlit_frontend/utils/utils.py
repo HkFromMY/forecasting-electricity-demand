@@ -119,7 +119,8 @@ def normalize_train_test(training_df, testing_df):
         'X_test': X_test,
         'y_train': y_train,
         'y_test': y_test,
-        'test_household_ids': test_household_ids
+        'test_household_ids': test_household_ids,
+        'train_household_ids': train_household_ids,
     }
 
 @st.cache_data
@@ -131,13 +132,14 @@ def load_data():
     training_df, testing_df, dps = generate_fourier(encoded_df)
     cleaned_data = normalize_train_test(training_df, testing_df)
 
+    cleaned_data['train_household_ids'] = household_encoder.inverse_transform(cleaned_data['train_household_ids'])
     cleaned_data['test_household_ids'] = household_encoder.inverse_transform(cleaned_data['test_household_ids'])
 
     return cleaned_data
 
 @st.cache_resource
 def load_deterministic_model():
-    model = tf.keras.models.load_model('models\\lstm_model.h5')
+    model = tf.keras.models.load_model('models\\cnn_lstm_model.h5')
 
     return model
 
@@ -164,9 +166,11 @@ def load_probabilistic_model():
     model.compile(
         optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
         loss={
-            "output_20": lambda y, y_hat: pinball_loss(y, y_hat, 0.2),
+            "output_10": lambda y, y_hat: pinball_loss(y, y_hat, 0.1),
+            "output_30": lambda y, y_hat: pinball_loss(y, y_hat, 0.3),
             "output_50": lambda y, y_hat: pinball_loss(y, y_hat, 0.5),
-            "output_80": lambda y, y_hat: pinball_loss(y, y_hat, 0.8)
+            "output_70": lambda y, y_hat: pinball_loss(y, y_hat, 0.7),
+            "output_90": lambda y, y_hat: pinball_loss(y, y_hat, 0.9),
         }
     )
     
